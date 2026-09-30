@@ -32,7 +32,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run scraper and generate calendar
-        run: python calendario.py
+        run: python script.py
 
       - name: Prepare artifact directory
         run: |
