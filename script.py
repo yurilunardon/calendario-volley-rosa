@@ -1,5 +1,5 @@
 """
-Scaper di FIPAV Vicenza per generare un file .ics con il calendario delle partite di una squadra specifica.
+Scaper di FIPAV Vicenza per generare un file .ics per il calendario delle partite di una squadra specifica.
 Estrae i dettagli delle partite: data, ora, sede e coordinate geografiche.
 """
 
@@ -12,22 +12,32 @@ from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # ---------- CONFIGURATION ---------------------------------------
 TEAM_NAME = "NEW VOLLEY CARTIGLIANO"
 CHAMPIONSHIP_ID = "92936"
 OUTPUT_FILE = "calendario.ics"
 MATCH_DURATION_HOURS = 2
+ALERT_TRIGGERS = ["-P1D", "-PT3H"]
 # ----------------------------------------------------------------
 
 BASE_URL = "https://www.fipavvicenza.it/mobile/risultati.asp"
 REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0"}
 TIMEZONE_ROME = ZoneInfo("Europe/Rome")
 
+# Sessione con tentativi automatici: se una richiesta fallisce (timeout, errori del server) riprova fino a 3 volte, aspettando sempre di più tra un tentativo e l'altro.
+SESSION = requests.Session()
+SESSION.headers.update(REQUEST_HEADERS)
+SESSION.mount("https://", HTTPAdapter(max_retries=Retry(
+    total=3, backoff_factor=2, status_forcelist=[429, 500, 502, 503, 504]
+)))
+
 
 @dataclass
 class MatchEvent:
-    """Dati singola gara estratti."""
+    """Dati singola gara."""
     match_id: str
     start_time: datetime
     home_team: str
@@ -37,6 +47,7 @@ class MatchEvent:
     address: str
     maps_url: str
     waze_url: str
+    apple_maps_url: str
     latitude: Optional[str] = None
     longitude: Optional[str] = None
 
@@ -45,7 +56,7 @@ def fetch_html(url: str) -> BeautifulSoup:
     """
     Esegue una richiesta HTTP GET e restituisce l'albero DOM parsato.
     """
-    response = requests.get(url, headers=REQUEST_HEADERS, timeout=30)
+    response = SESSION.get(url, timeout=30)
     response.raise_for_status()
     return BeautifulSoup(response.text, "html.parser")
 
@@ -106,8 +117,8 @@ def parse_match_details(soup: BeautifulSoup, match_id: str) -> Optional[MatchEve
     round_match = re.search(r"Giornata \d+ - Gara N.\s*\d+", raw_text)
     round_info = round_match.group(0) if round_match else ""
 
-    # Estrazione dati impianto sportivo e coordinate Google Maps/Waze
-    venue_name, address, maps_url, waze_url = "", "", "", ""
+    # Estrazione dati impianto sportivo e coordinate Google/Waze/Apple
+    venue_name, address, maps_url, waze_url, apple_maps_url = "", "", "", "", ""
     lat, lon = None, None
     
     venue_node = soup.select_one(".divImpianto")
@@ -122,8 +133,9 @@ def parse_match_details(soup: BeautifulSoup, match_id: str) -> Optional[MatchEve
             coords_match = re.search(r"q=(-?\d+\.\d+),(-?\d+\.\d+)", maps_url)
             if coords_match:
                 lat, lon = coords_match.groups()
-                # Generazione Deep Link universale per Waze
+                # Generazione Deep Link universali
                 waze_url = f"https://waze.com/ul?ll={lat},{lon}&navigate=yes"
+                apple_maps_url = f"https://maps.apple.com/?daddr={lat},{lon}"
 
     return MatchEvent(
         match_id=match_id,
@@ -135,12 +147,31 @@ def parse_match_details(soup: BeautifulSoup, match_id: str) -> Optional[MatchEve
         address=address,
         maps_url=maps_url,
         waze_url=waze_url,
+        apple_maps_url=apple_maps_url,
         latitude=lat,
         longitude=lon
     )
 
-
 # ---------- ICALENDAR (.ics) GENERATION ----------
+VTIMEZONE_ROME = [
+    "BEGIN:VTIMEZONE",
+    "TZID:Europe/Rome",
+    "BEGIN:DAYLIGHT",
+    "TZOFFSETFROM:+0100",
+    "TZOFFSETTO:+0200",
+    "TZNAME:CEST",
+    "DTSTART:19700329T020000",
+    "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU",
+    "END:DAYLIGHT",
+    "BEGIN:STANDARD",
+    "TZOFFSETFROM:+0200",
+    "TZOFFSETTO:+0100",
+    "TZNAME:CET",
+    "DTSTART:19701025T030000",
+    "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU",
+    "END:STANDARD",
+    "END:VTIMEZONE",
+]
 
 def escape_ics_text(text: str) -> str:
     """Effettua l'escape dei caratteri speciali riservati nello standard iCalendar."""
@@ -172,9 +203,12 @@ def build_ics_event(match: MatchEvent, current_time_utc: str) -> List[str]:
     location_parts = [part for part in (match.venue_name, match.address) if part]
     location_str = ", ".join(location_parts)
     
+    # Costruzione dinamica della Descrizione con tutti i link ai navigatori
     description = match.round_info
     if match.maps_url:
         description += f"\n\nGoogle Maps: {match.maps_url}"
+    if match.apple_maps_url:
+        description += f"\nApple Maps: {match.apple_maps_url}"
     if match.waze_url:
         description += f"\nWaze: {match.waze_url}"
 
@@ -184,8 +218,8 @@ def build_ics_event(match: MatchEvent, current_time_utc: str) -> List[str]:
         "BEGIN:VEVENT",
         f"UID:gara-{match.match_id}@fipav-calendario",
         f"DTSTAMP:{current_time_utc}",
-        f"DTSTART:{format_utc_datetime(match.start_time)}",
-        f"DTEND:{format_utc_datetime(end_time)}",
+        f"DTSTART;TZID=Europe/Rome:{match.start_time:%Y%m%dT%H%M%S}",
+        f"DTEND;TZID=Europe/Rome:{end_time:%Y%m%dT%H%M%S}",
         f"SUMMARY:{escape_ics_text(summary)}",
         f"LOCATION:{escape_ics_text(location_str)}",
         f"DESCRIPTION:{escape_ics_text(description)}",
@@ -203,6 +237,16 @@ def build_ics_event(match: MatchEvent, current_time_utc: str) -> List[str]:
     if match.maps_url:
         lines.append(f"URL:{match.maps_url}")
         
+    # Notifiche
+    for trigger in ALERT_TRIGGERS:
+        lines.extend([
+            "BEGIN:VALARM",
+            "ACTION:DISPLAY",
+            f"DESCRIPTION:{escape_ics_text(summary)}",
+            f"TRIGGER:{trigger}",
+            "END:VALARM",
+        ])
+
     lines.append("END:VEVENT")
     return lines
 
@@ -222,6 +266,8 @@ def generate_ics_calendar(matches: List[MatchEvent]) -> str:
         "X-PUBLISHED-TTL:PT6H",
     ]
     
+    lines.extend(VTIMEZONE_ROME)
+
     for match in matches:
         lines.extend(build_ics_event(match, current_time_utc))
         
@@ -240,12 +286,18 @@ def main() -> None:
     print(f"Identificate {len(match_ids)} partite per '{TEAM_NAME}'.\n")
 
     matches: List[MatchEvent] = []
+    errors: List[str] = []
     
     for match_id in match_ids:
         time.sleep(0.5)
         
-        detail_url = f"{BASE_URL}?CampionatoId={CHAMPIONSHIP_ID}&GaraId={match_id}"
-        match_event = parse_match_details(fetch_html(detail_url), match_id)
+        try:
+            detail_url = f"{BASE_URL}?CampionatoId={CHAMPIONSHIP_ID}&GaraId={match_id}"
+            match_event = parse_match_details(fetch_html(detail_url), match_id)
+        except requests.RequestException as e:
+            print(f"[!] Gara {match_id}: errore di rete ({e})")
+            errors.append(match_id)
+            continue
         
         if not match_event:
             print(f"[-] Gara {match_id}: Data non ancora definita (Skipped)")
@@ -253,6 +305,9 @@ def main() -> None:
             
         matches.append(match_event)
         print(f"[+] {match_event.start_time:%d/%m/%Y %H:%M} | {match_event.home_team} vs {match_event.away_team}")
+
+    if errors:
+        raise SystemExit(f"\n{len(errors)} gare non lette: file NON aggiornato, per non perdere partite dal calendario.")
 
     if not matches:
         raise SystemExit("\nNessun evento valido trovato. Il file di output non verrà sovrascritto.")
