@@ -3,7 +3,7 @@ name: Update Calendar
 on:
   schedule:
     - cron: "0 */6 * * *"      # Esecuzione programmata ogni 6 ore
-  workflow_dispatch:
+  workflow_dispatch: # test manual trigger
 
 permissions:
   contents: read
