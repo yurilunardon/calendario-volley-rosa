@@ -16,8 +16,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # ---------- CONFIGURATION ---------------------------------------
-TEAM_NAME = "NEW VOLLEY CARTIGLIANO"
-CHAMPIONSHIP_ID = "92936"
+TEAM_NAME = "COMUNELLO VOLLEY ROSA'"
+CHAMPIONSHIP_ID = "93505"
 OUTPUT_FILE = "calendario.ics"
 MATCH_DURATION_HOURS = 2
 ALERT_TRIGGERS = ["-P1D", "-PT3H"]
