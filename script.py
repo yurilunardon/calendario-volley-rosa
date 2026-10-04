@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import requests
@@ -133,9 +134,21 @@ def parse_match_details(soup: BeautifulSoup, match_id: str) -> Optional[MatchEve
             coords_match = re.search(r"q=(-?\d+\.\d+),(-?\d+\.\d+)", maps_url)
             if coords_match:
                 lat, lon = coords_match.groups()
-                # Generazione Deep Link universali
+                # Generazione Deep Link universali basati su coordinate
                 waze_url = f"https://waze.com/ul?ll={lat},{lon}&navigate=yes"
                 apple_maps_url = f"https://maps.apple.com/?daddr={lat},{lon}"
+            else:
+                # Fallback testuale se mancano le coordinate
+                q_match = re.search(r"q=([^&]+)", maps_url)
+                if q_match:
+                    # Se Google Maps passa il testo tramite "q="
+                    search_query = q_match.group(1)
+                else:
+                    # Genera la query unendo nome e indirizzo codificandoli per l'URL
+                    search_query = quote(f"{venue_name} {address}".strip())
+                
+                waze_url = f"https://waze.com/ul?q={search_query}&navigate=yes"
+                apple_maps_url = f"https://maps.apple.com/?daddr={search_query}"
 
     return MatchEvent(
         match_id=match_id,
