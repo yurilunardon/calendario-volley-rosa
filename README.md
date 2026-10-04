@@ -1,6 +1,6 @@
-# 🏐 FIPAV to iCal (.ics) New Volley Cartigliano - Prima divisione maschile
+# 🏐 FIPAV to iCal (.ics) COMUNELLO VOLLEY ROSA' - Seconda divisione maschile
 
-Scraper in Python che estrae il calendario FIPAV del New Volley Cartigliano (Prima divisione maschile) e lo converte in un file .ics sincronizzato.
+Scraper in Python che estrae il calendario FIPAV del COMUNELLO VOLLEY ROSA' (Seconda divisione maschile) e lo converte in un file .ics sincronizzato.
 
 ---
 
